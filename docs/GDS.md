@@ -101,6 +101,9 @@ Secured fields allow the rabbit to cultivate Allotment & Garden Vegetable Patche
 - One crop patch with crop-thief raiding.
 - Deferred: tunnels, silos, overworld, armor crafting, multiplayer. Store field layouts as data from day one.
 
+### Player stance (decided)
+The rabbit moves on all fours and rears up on its hind legs to use equipment, like a real rabbit sitting up to look around. Proposed rule: moving without attacking = all fours (full speed, Burrow-Dash available); attacking or aiming = upright with a slower strafe. Gives a speed vs. firepower trade-off and a readable silhouette from the isometric camera. Weapon is slung on the back while on all fours.
+
 ### Missing sections
 Target platform and input (gamepad / mouse & keyboard), audience and age rating, session length, business model.
 
