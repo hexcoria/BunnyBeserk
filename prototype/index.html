@@ -268,12 +268,54 @@ function setStance(s) {
 
 const loader = new GLTFLoader();
 const bar = document.getElementById('bar');
-function load(urls) {
-  const url = urls.shift();
-  loader.load(url, onLoad, p => { if (p.total) bar.style.width = (100 * p.loaded / p.total).toFixed(0) + '%'; },
-    err => urls.length ? load(urls) : (document.getElementById('loadMsg').textContent = 'Could not load bunny_example.glb. Serve this folder over http (e.g. npx serve) rather than opening the file directly.'));
+const EST_BYTES = 5.8e6; // used for the progress bar when the server sends no length
+
+// Fetch the model ourselves so no viewer has to allow fetching data: URIs.
+// Accepts a .glb, or the published .gltf.json copy (one base64 buffer), which is
+// rebuilt into a .glb in memory before parsing.
+async function fetchBytes(url) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`${url}: HTTP ${res.status}`);
+  const total = +res.headers.get('content-length') || EST_BYTES;
+  if (!res.body) return new Uint8Array(await res.arrayBuffer());
+  const reader = res.body.getReader(), parts = []; let got = 0;
+  for (;;) {
+    const { done, value } = await reader.read(); if (done) break;
+    parts.push(value); got += value.length;
+    bar.style.width = Math.min(100, 100 * got / total).toFixed(0) + '%';
+  }
+  const out = new Uint8Array(got); let o = 0; for (const p of parts) { out.set(p, o); o += p.length; }
+  return out;
 }
-load(['bunny_example.glb', 'bunny_example.gltf.json', '../assets/models/bunny_example.glb']);
+function gltfJsonToGlb(bytes) {
+  const json = JSON.parse(new TextDecoder().decode(bytes));
+  const uri = json.buffers[0].uri; delete json.buffers[0].uri;
+  const b64 = atob(uri.slice(uri.indexOf(',') + 1));
+  const bin = new Uint8Array(b64.length); for (let i = 0; i < b64.length; i++) bin[i] = b64.charCodeAt(i);
+  const pad4 = n => (n + 3) & ~3;
+  const js = new TextEncoder().encode(JSON.stringify(json));
+  const jl = pad4(js.length), bl = pad4(bin.length);
+  const glb = new Uint8Array(12 + 8 + jl + 8 + bl), dv = new DataView(glb.buffer);
+  dv.setUint32(0, 0x46546C67, true); dv.setUint32(4, 2, true); dv.setUint32(8, glb.length, true);
+  dv.setUint32(12, jl, true); dv.setUint32(16, 0x4E4F534A, true);
+  glb.set(js, 20); glb.fill(0x20, 20 + js.length, 20 + jl);
+  dv.setUint32(20 + jl, bl, true); dv.setUint32(24 + jl, 0x004E4942, true);
+  glb.set(bin, 28 + jl);
+  return glb.buffer;
+}
+async function load(urls) {
+  const errors = [];
+  for (const url of urls) {
+    try {
+      const bytes = await fetchBytes(url);
+      const isGlb = bytes[0] === 0x67 && bytes[1] === 0x6C && bytes[2] === 0x54 && bytes[3] === 0x46;
+      const buf = isGlb ? bytes.buffer : gltfJsonToGlb(bytes);
+      return await new Promise((ok, fail) => loader.parse(buf, '', g => { onLoad(g); ok(); }, fail));
+    } catch (e) { errors.push(e.message || String(e)); }
+  }
+  document.getElementById('loadMsg').textContent = 'Could not load the bunny model (' + errors.join('; ') + '). If you opened the file directly, serve the folder over http instead (e.g. npx serve).';
+}
+load(['bunny_example.gltf.json', 'bunny_example.glb', '../assets/models/bunny_example.glb']);
 
 function onLoad(gltf) {
   bunny = gltf.scene;
