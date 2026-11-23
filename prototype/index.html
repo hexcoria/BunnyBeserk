@@ -74,13 +74,14 @@
       <li><kbd>Shift</kbd> run</li>
       <li>Hold <kbd>mouse</kbd> or <kbd>Space</kbd> rear up &amp; fire</li>
       <li><kbd>Wheel</kbd> or <kbd>+</kbd><kbd>−</kbd> zoom</li>
-      <li>Foxes raid the carrots. 4 seeds poofs one.</li>
+      <li><kbd>Q</kbd><kbd>E</kbd> rotate view</li>
+      <li>Hit a fox to make it drop its carrot. Grab it and hop into the bed to replant. 4 hits poofs a fox.</li>
     </ul>
     <ul class="keys touch-only">
       <li>Left stick: hop, push fully to run</li>
       <li>Hold the carrot button to rear up &amp; fire</li>
-      <li>Pinch or +/− to zoom</li>
-      <li>Foxes raid the carrots. 4 seeds poofs one.</li>
+      <li>Two fingers: pinch to zoom, twist to rotate</li>
+      <li>Hit a fox to make it drop its carrot. Grab it and hop into the bed to replant. 4 hits poofs a fox.</li>
     </ul>
   </div>
 </div>
@@ -92,6 +93,7 @@
   </div>
   <div class="state">
     <span class="pill">Carrots <b id="carrots">12/12</b></span>
+    <span class="pill up" id="carryPill" hidden>Carrying <b id="carrying">0</b></span>
     <span class="pill">Poofed <b id="poofed">0</b></span>
     <span class="pill">Stolen <b id="lost">0</b></span>
   </div>
@@ -121,8 +123,10 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
 // ---------- tuning (metres, seconds) ----------
-const SPEED = { hop: 1.4, run: 4.0, strafe: 0.7, transition: 0.4 };
-const FIRE_INTERVAL = 0.55;
+const SPEED = { hop: 1.4, run: 4.0, strafe: 1.3, transition: 1.0 };
+const FIRE_INTERVAL = 0.35;
+const SPREAD = [-0.16, 0, 0.16];   // radians: three seeds per shot
+const AUTO_AIM_RANGE = 7;          // touch: aim at the nearest fox within this many metres
 const PERISCOPE_AFTER = 3.0;   // idle on all fours this long -> sit up and look around
 const LOOPS = ['idle_up', 'aim_up', 'strafe_up', 'idle_fours', 'hop', 'run'];
 
@@ -184,13 +188,18 @@ function makeCarrot() {
   g.add(top, root); g.traverse(o => { if (o.isMesh) o.castShadow = true; });
   return g;
 }
-// each plot slot holds one carrot; foxes steal them
-const plots = [];
-for (let i = 0; i < 4; i++) for (let j = 0; j < 3; j++) {
-  const home = new THREE.Vector3(1.4 + i * 0.4, 0.08, -2.35 + j * 0.35);
-  const c = makeCarrot(); c.position.copy(home); scene.add(c);
-  plots.push({ home, carrot: c, taken: false });
+// Carrots are entities: planted in a plot, carried by a fox, dropped on the ground,
+// carried by the bunny, or gone (escaped off the map).
+const plots = [], carrots = [];
+for (let i = 0; i < 4; i++) for (let j = 0; j < 3; j++) plots.push({ home: new THREE.Vector3(1.4 + i * 0.4, 0.08, -2.35 + j * 0.35), carrot: null });
+const BED = { x0: 0.8, x1: 3.2, z0: -2.8, z1: -1.2 };   // bed bounds plus a margin, for returning carrots
+function plantCarrot(plot, c) {
+  if (!c) { c = { mesh: makeCarrot(), state: '', plot: null, t: 0 }; carrots.push(c); }
+  c.mesh.removeFromParent(); scene.add(c.mesh);
+  c.mesh.position.copy(plot.home); c.mesh.rotation.set(0, 0, 0);
+  c.state = 'planted'; c.plot = plot; plot.carrot = c;
 }
+plots.forEach(p => plantCarrot(p));
 const tuftGeo = new THREE.ConeGeometry(0.04, 0.18, 4);
 const tuftMat = new THREE.MeshStandardMaterial({ color: '#6db843' });
 const tufts = new THREE.InstancedMesh(tuftGeo, tuftMat, 500);
@@ -251,9 +260,10 @@ function makeFox() {
   return { g, body, head, tail, legs };
 }
 
-const FOX = { walk: 2.0, flee: 3.0, lunge: 4.2, hp: 4, sight: 2.2, maxAtOnce: 2, spawnEvery: 5 };
+const FOX = { walk: 2.0, flee: 3.0, lunge: 4.2, hp: 4, sight: 2.2, maxAtOnce: 2, spawnEvery: 5, stun: 0.8 };
 const foxes = [], poofs = [];
-const score = { poofed: 0, lost: 0 };
+const score = { poofed: 0, lost: 0, returned: 0 };
+const bunnyCarry = [];
 let spawnT = 2;
 
 function spawnFox() {
@@ -261,18 +271,22 @@ function spawnFox() {
   const f = makeFox();
   f.g.position.set(Math.cos(a) * 13, 0, Math.sin(a) * 13);
   scene.add(f.g);
-  foxes.push({ ...f, state: 'raid', hp: FOX.hp, plot: null, carry: null, t: 0, flash: 0, heading: 0, cd: 0 });
+  foxes.push({ ...f, state: 'raid', hp: FOX.hp, target: null, carry: null, t: 0, flash: 0, heading: 0, cd: 0, stun: 0 });
 }
-function pickPlot(fox) {
-  const free = plots.filter(p => !p.taken && !foxes.some(o => o.plot === p));
+const grabbable = c => c.state === 'planted' || c.state === 'ground';
+function pickTarget(fox) {
+  const free = carrots.filter(c => grabbable(c) && !foxes.some(o => o !== fox && o.target === c));
   if (!free.length) return null;
-  free.sort((a, b) => a.home.distanceToSquared(fox.g.position) - b.home.distanceToSquared(fox.g.position));
+  free.sort((a, b) => a.mesh.position.distanceToSquared(fox.g.position) - b.mesh.position.distanceToSquared(fox.g.position));
   return free[0];
 }
-function returnCarrot(fox) {
-  if (!fox.carry) return;
-  const p = fox.carry; fox.carry = null;
-  p.carrot.removeFromParent(); p.carrot.position.copy(p.home); p.carrot.rotation.set(0, 0, 0); scene.add(p.carrot); p.taken = false;
+function dropCarrot(fox) {
+  const c = fox.carry; if (!c) return;
+  fox.carry = null;
+  c.mesh.removeFromParent(); scene.add(c.mesh);
+  c.mesh.position.set(fox.g.position.x, 0.06, fox.g.position.z);
+  c.mesh.rotation.set(0, Math.random() * 6, Math.PI / 2);
+  c.state = 'ground'; c.t = 0;
 }
 function poof(pos) {
   for (let i = 0; i < 9; i++) {
@@ -295,21 +309,25 @@ const bunnyKnock = new THREE.Vector3();
 
 function updateFoxes(dt) {
   spawnT -= dt;
-  if (spawnT <= 0 && foxes.length < FOX.maxAtOnce && plots.some(p => !p.taken)) { spawnFox(); spawnT = FOX.spawnEvery; }
+  if (spawnT <= 0 && foxes.length < FOX.maxAtOnce && carrots.some(grabbable)) { spawnFox(); spawnT = FOX.spawnEvery; }
 
   for (const fox of [...foxes]) {
-    fox.t += dt; fox.cd -= dt;
+    fox.t += dt; fox.cd -= dt; fox.stun -= dt;
     const pos = fox.g.position;
     const toBunny = bunny ? pos.distanceTo(bunny.position) : 99;
     let speed = 0;
 
-    if (fox.state === 'raid') {
-      if (!fox.plot || fox.plot.taken) fox.plot = pickPlot(fox);
+    if (fox.stun > 0) {
+      // dazed after a hit: stand still
+    } else if (fox.state === 'raid') {
+      if (!fox.target || !grabbable(fox.target)) fox.target = pickTarget(fox);
       if (toBunny < FOX.sight && fox.cd <= 0) { fox.state = 'lunge'; fox.t = 0; }
-      else if (!fox.plot) { fox.state = 'leave'; }
-      else if (steerFox(fox, fox.plot.home, speed = FOX.walk, dt) < 0.15) {
-        const p = fox.plot; p.taken = true; fox.carry = p; fox.plot = null;
-        fox.head.add(p.carrot); p.carrot.position.set(0, -0.06, 0.2); p.carrot.rotation.set(Math.PI / 2, 0, 0);
+      else if (!fox.target) { fox.state = 'leave'; }
+      else if (steerFox(fox, fox.target.mesh.position, speed = FOX.walk, dt) < 0.2) {
+        const c = fox.target; fox.target = null;
+        if (c.plot) { c.plot.carrot = null; c.plot = null; }
+        c.state = 'fox'; fox.carry = c;
+        fox.head.add(c.mesh); c.mesh.position.set(0, -0.06, 0.2); c.mesh.rotation.set(Math.PI / 2, 0, 0);
         fox.state = 'flee';
       }
     } else if (fox.state === 'lunge') {
@@ -319,12 +337,13 @@ function updateFoxes(dt) {
         fox.state = 'raid'; fox.cd = 2.5;
       } else if (fox.t > 1.0) { fox.state = 'raid'; fox.cd = 1.5; }
     } else if (fox.state === 'flee' || fox.state === 'leave') {
+      if (fox.state === 'leave' && carrots.some(grabbable)) fox.state = 'raid';
       const out = pos.clone().setY(0); if (out.lengthSq() < 0.01) out.set(1, 0, 0);
       out.setLength(16);
       speed = fox.state === 'flee' ? FOX.flee : FOX.walk;
       steerFox(fox, out, speed, dt);
       if (pos.length() > 15) {
-        if (fox.carry) { fox.carry.carrot.removeFromParent(); score.lost++; fox.carry = null; }
+        if (fox.carry) { const c = fox.carry; c.mesh.removeFromParent(); c.state = 'gone'; score.lost++; fox.carry = null; }
         removeFox(fox); continue;
       }
     }
@@ -337,30 +356,61 @@ function updateFoxes(dt) {
     fox.flash = Math.max(0, fox.flash - dt * 4);
     fox.g.scale.setScalar(1 + fox.flash * 0.15);
 
-    // seed hits
+    // seed hits: the first hit makes it drop its carrot
     for (let i = seeds.length - 1; i >= 0; i--) {
-      const s = seeds[i].mesh.position;
-      if (Math.hypot(s.x - pos.x, s.z - pos.z) < 0.32 && s.y < 0.6) {
+      const sp = seeds[i].mesh.position;
+      if (Math.hypot(sp.x - pos.x, sp.z - pos.z) < 0.32 && sp.y < 0.6) {
         scene.remove(seeds[i].mesh); seeds.splice(i, 1);
         fox.hp--; fox.flash = 1;
-        if (fox.hp <= 0) { returnCarrot(fox); poof(pos); score.poofed++; removeFox(fox); break; }
+        if (fox.carry) { dropCarrot(fox); fox.stun = FOX.stun; fox.state = 'raid'; fox.target = null; fox.cd = 0.5; }
+        if (fox.hp <= 0) { poof(pos); score.poofed++; removeFox(fox); break; }
       }
     }
   }
 
-  // patch regrows once it's been emptied and the raid is over
-  if (plots.every(p => p.taken) && !foxes.some(f => f.carry)) {
-    for (const p of plots) { p.carrot = makeCarrot(); p.carrot.position.copy(p.home); scene.add(p.carrot); p.taken = false; }
-  }
+  updateCarrots(dt);
 
   for (let i = poofs.length - 1; i >= 0; i--) {
     const p = poofs[i]; p.t += dt;
     p.m.position.addScaledVector(p.v, dt); p.m.scale.setScalar(1 + p.t * 3); p.m.material.opacity = Math.max(0, 0.95 - p.t * 1.6);
     if (p.t > 0.6) { scene.remove(p.m); poofs.splice(i, 1); }
   }
-  hud.carrots.textContent = `${plots.filter(p => !p.taken).length}/${plots.length}`;
+  hud.carrots.textContent = `${carrots.filter(c => c.state === 'planted').length}/${plots.length}`;
+  hud.carrying.textContent = bunnyCarry.length;
+  hud.carryPill.hidden = bunnyCarry.length === 0;
   hud.poofed.textContent = score.poofed;
   hud.lost.textContent = score.lost;
+}
+
+// handle for poking at the prototype from the browser console
+window.bunnyDebug = { foxes, carrots, score, get bunny() { return bunny; } };
+
+function updateCarrots(dt) {
+  if (!bunny) return;
+  const bp = bunny.position;
+  for (const c of carrots) {
+    if (c.state !== 'ground') continue;
+    c.t += dt;
+    c.mesh.position.y = 0.06 + Math.abs(Math.sin(c.t * 4)) * 0.06;   // little bounce so dropped carrots stand out
+    c.mesh.rotation.y += dt * 2;
+    if (Math.hypot(c.mesh.position.x - bp.x, c.mesh.position.z - bp.z) < 0.45) { c.state = 'bunny'; bunnyCarry.push(c); }
+  }
+  // carried carrots stack above the bunny's head
+  bunnyCarry.forEach((c, i) => {
+    c.mesh.position.set(bp.x, 0.95 + i * 0.09, bp.z);
+    c.mesh.rotation.set(0, heading + i * 0.5, Math.PI / 2);
+  });
+  // walk into the bed to replant them
+  if (bunnyCarry.length && bp.x > BED.x0 && bp.x < BED.x1 && bp.z > BED.z0 && bp.z < BED.z1) {
+    for (const c of [...bunnyCarry]) {
+      const plot = plots.find(p => !p.carrot); if (!plot) break;
+      bunnyCarry.splice(bunnyCarry.indexOf(c), 1); plantCarrot(plot, c); score.returned++;
+    }
+  }
+  // patch regrows once every carrot is gone for good
+  if (carrots.length && carrots.every(c => c.state === 'gone')) {
+    carrots.length = 0; plots.forEach(p => { p.carrot = null; plantCarrot(p); });
+  }
 }
 
 // seeds
@@ -386,17 +436,21 @@ addEventListener('keydown', e => { if (e.key === '+' || e.key === '=') setZoom(z
 document.getElementById('zoomIn').addEventListener('click', () => setZoom(zoom * 0.8));
 document.getElementById('zoomOut').addEventListener('click', () => setZoom(zoom / 0.8));
 // pinch zoom: two fingers on the meadow (not on the stick or fire button)
-const pinch = new Map(); let pinchStart = 0, pinchZoom = 1;
+const pinch = new Map(); let pinchStart = 0, pinchZoom = 1, pinchAngle = 0, pinchYaw = 0, yaw = 0;
+const pinchAng = () => { const [a, b] = [...pinch.values()]; return Math.atan2(b.y - a.y, b.x - a.x); };
 const pinchDist = () => { const [a, b] = [...pinch.values()]; return Math.hypot(a.x - b.x, a.y - b.y); };
 renderer.domElement.addEventListener('pointerdown', e => {
   if (e.pointerType !== 'touch') return;
   pinch.set(e.pointerId, { x: e.clientX, y: e.clientY });
-  if (pinch.size === 2) { pinchStart = pinchDist(); pinchZoom = zoom; }
+  if (pinch.size === 2) { pinchStart = pinchDist(); pinchZoom = zoom; pinchAngle = pinchAng(); pinchYaw = yaw; }
 });
 renderer.domElement.addEventListener('pointermove', e => {
   if (!pinch.has(e.pointerId)) return;
   pinch.set(e.pointerId, { x: e.clientX, y: e.clientY });
-  if (pinch.size === 2 && pinchStart > 0) setZoom(pinchZoom * pinchStart / pinchDist());
+  if (pinch.size === 2 && pinchStart > 0) {
+    setZoom(pinchZoom * pinchStart / pinchDist());
+    yaw = pinchYaw + (pinchAng() - pinchAngle);   // the map turns with your fingers
+  }
 });
 for (const ev of ['pointerup', 'pointercancel']) renderer.domElement.addEventListener(ev, e => { pinch.delete(e.pointerId); if (pinch.size < 2) pinchStart = 0; });
 
@@ -421,7 +475,7 @@ fireBtn.addEventListener('pointerup', fireEnd); fireBtn.addEventListener('pointe
 
 // ---------- bunny ----------
 const hud = { stance: document.getElementById('stance'), clip: document.getElementById('clip'), sel: document.getElementById('clipSel'),
-  carrots: document.getElementById('carrots'), poofed: document.getElementById('poofed'), lost: document.getElementById('lost') };
+  carrots: document.getElementById('carrots'), carrying: document.getElementById('carrying'), carryPill: document.getElementById('carryPill'), poofed: document.getElementById('poofed'), lost: document.getElementById('lost') };
 let bunny, mixer, actions = {}, current = null, bones = {};
 const st = { stance: 'fours', firing: false, fireCd: 0, idleT: 0, periscope: false, preview: '' };
 
@@ -542,6 +596,7 @@ hud.sel.addEventListener('change', () => {
 
 // ---------- loop ----------
 const ray = new THREE.Raycaster(), groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+const UP = new THREE.Vector3(0, 1, 0);
 const aimPt = new THREE.Vector3(), tmp = new THREE.Vector3(), move = new THREE.Vector3();
 let heading = 0;
 const clock = new THREE.Clock();
@@ -565,7 +620,8 @@ function update(dt) {
   let mag = Math.min(1, move.length());
   if (stickVec.lengthSq() > 0.02) { move.set(stickVec.x, 0, stickVec.y); mag = Math.min(1, stickVec.length()); }
   const moving = mag > 0.1;
-  if (moving) move.normalize();
+  if (moving) move.normalize().applyAxisAngle(UP, yaw);   // screen-relative after rotating the view
+  if (keys.has('KeyQ')) yaw += dt * 2; if (keys.has('KeyE')) yaw -= dt * 2;
   const running = moving && (keys.has('ShiftLeft') || keys.has('ShiftRight') || mag > 0.92 && stickId !== null);
   const aiming = mouseHeld || keys.has('Space') || touchFire;
 
@@ -578,16 +634,18 @@ function update(dt) {
   if (wantUp && st.stance === 'fours') { setStance('rising'); attachWeapon('hand'); current = null; play('rise_to_up', 0.08, true); }
   if (!wantUp && st.stance === 'up' && !st.firing) { setStance('dropping'); current = null; play('drop_to_fours', 0.08, true); }
 
-  // aim point
+  // aim: mouse cursor on desktop; on touch, the nearest fox in range, else the way you're moving
+  let hasAim = false;
   if (aiming) {
-    if (pointerOnStage && mouseHeld || pointerOnStage && keys.has('Space')) {
-      ray.setFromCamera(pointerNDC, camera); ray.ray.intersectPlane(groundPlane, aimPt);
+    if (pointerOnStage && (mouseHeld || keys.has('Space'))) {
+      ray.setFromCamera(pointerNDC, camera); hasAim = !!ray.ray.intersectPlane(groundPlane, aimPt);
     } else {
-      aimPt.set(Math.sin(heading), 0, Math.cos(heading)).multiplyScalar(3).add(bunny.position);
+      let best = AUTO_AIM_RANGE;
+      for (const f of foxes) { const dd = f.g.position.distanceTo(bunny.position); if (dd < best) { best = dd; aimPt.copy(f.g.position); hasAim = true; } }
     }
-    reticle.position.set(aimPt.x, 0.01, aimPt.z);
+    if (hasAim) reticle.position.set(aimPt.x, 0.01, aimPt.z);
   }
-  reticle.visible = aiming && st.stance !== 'fours';
+  reticle.visible = hasAim && st.stance !== 'fours';
 
   // speed by stance
   let speed = 0;
@@ -599,7 +657,7 @@ function update(dt) {
 
   // facing: toward aim when upright and aiming, otherwise toward travel
   let target = heading;
-  if (aiming && st.stance !== 'fours') { tmp.subVectors(aimPt, bunny.position); if (tmp.lengthSq() > 0.01) target = Math.atan2(tmp.x, tmp.z); }
+  if (hasAim && st.stance !== 'fours') { tmp.subVectors(aimPt, bunny.position); if (tmp.lengthSq() > 0.01) target = Math.atan2(tmp.x, tmp.z); }
   else if (moving) target = Math.atan2(move.x, move.z);
   let d = ((target - heading + Math.PI) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2) - Math.PI;
   heading += d * Math.min(1, dt * 12);
@@ -608,15 +666,20 @@ function update(dt) {
   // firing
   st.fireCd -= dt;
   if (aiming && st.stance === 'up' && st.fireCd <= 0) {
-    st.fireCd = FIRE_INTERVAL; st.firing = true; current = null; play('fire_up', 0.05, true);
-    const m = new THREE.Mesh(seedGeo, seedMat); m.castShadow = true;
-    launcher.getWorldPosition(m.position);
-    const dir = new THREE.Vector3(Math.sin(heading), 0.12, Math.cos(heading)).normalize();
-    m.position.addScaledVector(dir, 0.15);
-    scene.add(m); seeds.push({ mesh: m, v: dir.multiplyScalar(9), life: 1.2 });
+    st.fireCd = FIRE_INTERVAL;
+    // recoil clip only when standing still, so the legs keep strafing while moving
+    if (!moving) { st.firing = true; current = null; play('fire_up', 0.05, true); }
+    for (const off of SPREAD) {
+      const m = new THREE.Mesh(seedGeo, seedMat); m.castShadow = true;
+      launcher.getWorldPosition(m.position);
+      const dir = new THREE.Vector3(Math.sin(heading + off), 0.12, Math.cos(heading + off)).normalize();
+      m.position.addScaledVector(dir, 0.15);
+      scene.add(m); seeds.push({ mesh: m, v: dir.multiplyScalar(9), life: 1.2 });
+    }
   }
 
   // loop clip for the current stance
+  if (st.firing && moving) st.firing = false;   // start moving mid-recoil: go straight back to strafing
   if (!st.firing && (st.stance === 'fours' || st.stance === 'up')) {
     const want = st.stance === 'fours' ? (moving ? (running ? 'run' : 'hop') : 'idle_fours')
       : moving ? 'strafe_up' : aiming ? 'aim_up' : 'idle_up';
@@ -628,9 +691,9 @@ function frame() {
   const dt = Math.min(clock.getDelta(), 0.05);
   update(dt);
   const focus = bunny ? bunny.position : new THREE.Vector3();
-  camera.position.copy(focus).addScaledVector(camOffset, zoom);
+  camera.position.copy(focus).addScaledVector(tmp.copy(camOffset).applyAxisAngle(UP, yaw), zoom);
   camera.lookAt(focus.x, focus.y + 0.3, focus.z);
-  sun.position.set(focus.x + 3, 6, focus.z + 2); sun.target.position.copy(focus);
+  sun.position.set(focus.x + 3, 6, focus.z + 2); // sun stays fixed in the world sun.target.position.copy(focus);
   renderer.render(scene, camera);
   requestAnimationFrame(frame);
 }
