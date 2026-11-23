@@ -1,0 +1,407 @@
+<meta charset="utf-8">
+<title>Bunny Berserk Rig Test</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@600;800&family=Nunito:wght@500;700&display=swap">
+<style>
+  /* Layout: full-screen 3D meadow; HUD chips float in the corners, touch controls along the bottom. Single bright "game screen" look in every theme. */
+  :root {
+    --sky: #bfe6f2;
+    --ink: #2c3a1f;
+    --panel: rgba(255, 252, 240, 0.9);
+    --carrot: #f07a1a;
+    --leaf: #5aa83a;
+    --muted: #6b7a58;
+    --display: "Baloo 2", "Trebuchet MS", system-ui, sans-serif;
+    --body: "Nunito", system-ui, -apple-system, "Segoe UI", sans-serif;
+    color-scheme: light;
+  }
+  html, body { height: 100%; }
+  body { margin: 0; background: var(--sky); color: var(--ink); font-family: var(--body); overflow: hidden; touch-action: none; -webkit-user-select: none; user-select: none; }
+  #stage { position: fixed; inset: 0; }
+  #stage canvas { display: block; width: 100%; height: 100%; }
+
+  .hud { position: fixed; z-index: 2; display: flex; flex-direction: column; gap: 8px; pointer-events: none; }
+  .hud > * { pointer-events: auto; }
+  .tl { top: calc(12px + env(safe-area-inset-top, 0px)); left: max(16px, env(safe-area-inset-left, 0px)); max-width: min(320px, calc(100vw - 32px)); }
+  .tr { top: calc(12px + env(safe-area-inset-top, 0px)); right: max(16px, env(safe-area-inset-right, 0px)); align-items: flex-end; }
+
+  .card { background: var(--panel); border-radius: 14px; padding: 10px 14px; box-shadow: 0 2px 0 rgba(44, 58, 31, 0.15); }
+  h1 { font-family: var(--display); font-weight: 800; font-size: 1.35rem; line-height: 1; margin: 0; letter-spacing: 0.01em; }
+  h1 span { color: var(--carrot); }
+  .sub { margin: 4px 0 0; font-size: 0.8rem; color: var(--muted); }
+  .keys { margin: 8px 0 0; padding: 0; list-style: none; font-size: 0.8rem; display: grid; gap: 3px; }
+  kbd { font-family: var(--body); font-weight: 700; font-size: 0.72rem; background: #fff; border: 1px solid #d8d2bd; border-bottom-width: 2px; border-radius: 5px; padding: 0 5px; }
+  .touch-only { display: none; }
+  @media (pointer: coarse) { .desk-only { display: none; } .touch-only { display: block; } }
+
+  .state { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+  .pill { font-family: var(--display); font-weight: 600; font-size: 0.85rem; background: var(--panel); border-radius: 999px; padding: 3px 12px; box-shadow: 0 2px 0 rgba(44, 58, 31, 0.15); font-variant-numeric: tabular-nums; }
+  .pill.up { background: var(--carrot); color: #fff; }
+  .pill.fours { background: var(--leaf); color: #fff; }
+
+  .clips { display: flex; gap: 6px; align-items: center; }
+  .clips label { font-size: 0.75rem; color: var(--muted); font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; }
+  select, button { font: 700 0.85rem var(--body); color: var(--ink); background: #fff; border: 2px solid #d8d2bd; border-radius: 10px; padding: 4px 8px; }
+  button { cursor: pointer; }
+  select:focus-visible, button:focus-visible { outline: 3px solid var(--carrot); outline-offset: 1px; }
+
+  #loading[hidden] { display: none; }
+  #loading { position: fixed; inset: 0; z-index: 5; display: grid; place-items: center; background: var(--sky); font-family: var(--display); font-size: 1.3rem; font-weight: 800; }
+  #loading .bar { width: 200px; height: 10px; background: #fff; border-radius: 99px; overflow: hidden; margin-top: 10px; }
+  #loading .bar i { display: block; height: 100%; width: 0; background: var(--carrot); }
+  #loading p { margin: 8px 0 0; font: 500 0.85rem var(--body); color: var(--muted); text-align: center; max-width: 280px; }
+
+  /* touch controls */
+  #stick { position: fixed; z-index: 3; left: calc(28px + env(safe-area-inset-left, 0px)); bottom: calc(28px + env(safe-area-inset-bottom, 0px)); width: 120px; height: 120px; border-radius: 50%; background: rgba(255, 252, 240, 0.45); border: 3px solid rgba(255, 252, 240, 0.8); display: none; }
+  #stick i { position: absolute; left: 50%; top: 50%; width: 52px; height: 52px; margin: -26px 0 0 -26px; border-radius: 50%; background: var(--panel); box-shadow: 0 2px 0 rgba(44, 58, 31, 0.2); }
+  #fire { position: fixed; z-index: 3; right: calc(28px + env(safe-area-inset-right, 0px)); bottom: calc(40px + env(safe-area-inset-bottom, 0px)); width: 96px; height: 96px; border-radius: 50%; border: 0; background: var(--carrot); color: #fff; font: 800 1rem var(--display); box-shadow: 0 4px 0 #b9560c; display: none; }
+  #fire.held { transform: translateY(3px); box-shadow: 0 1px 0 #b9560c; }
+  @media (pointer: coarse) { #stick, #fire { display: block; } }
+  @media (prefers-reduced-motion: reduce) { #fire.held { transform: none; } }
+</style>
+
+<div id="stage"></div>
+
+<div class="hud tl">
+  <div class="card">
+    <h1>Bunny <span>Berserk</span></h1>
+    <p class="sub">Rig &amp; stance test · bunny_example.glb</p>
+    <ul class="keys desk-only">
+      <li><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> hop on all fours</li>
+      <li><kbd>Shift</kbd> run</li>
+      <li>Hold <kbd>mouse</kbd> or <kbd>Space</kbd> rear up &amp; fire</li>
+      <li><kbd>Wheel</kbd> zoom</li>
+    </ul>
+    <ul class="keys touch-only">
+      <li>Left stick: hop, push fully to run</li>
+      <li>Hold the carrot button to rear up &amp; fire</li>
+    </ul>
+  </div>
+</div>
+
+<div class="hud tr">
+  <div class="state">
+    <span class="pill fours" id="stance">all fours</span>
+    <span class="pill" id="clip">idle_fours</span>
+  </div>
+  <div class="card clips">
+    <label for="clipSel">Clip</label>
+    <select id="clipSel"><option value="">Play mode</option></select>
+  </div>
+</div>
+
+<div id="stick"><i></i></div>
+<button id="fire" type="button" aria-label="Aim and fire">FIRE</button>
+
+<div id="loading"><div>Loading bunny…<div class="bar"><i id="bar"></i></div><p id="loadMsg">4.4 MB model</p></div></div>
+
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+} }
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+
+// ---------- tuning (metres, seconds) ----------
+const SPEED = { hop: 1.4, run: 4.0, strafe: 0.7, transition: 0.4 };
+const FIRE_INTERVAL = 0.55;
+const PERISCOPE_AFTER = 3.0;   // idle on all fours this long -> sit up and look around
+const LOOPS = ['idle_up', 'aim_up', 'strafe_up', 'idle_fours', 'hop', 'run'];
+
+// ---------- scene ----------
+const stage = document.getElementById('stage');
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+stage.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color('#bfe6f2');
+scene.fog = new THREE.Fog('#bfe6f2', 14, 30);
+
+const camera = new THREE.PerspectiveCamera(40, 1, 0.05, 100);
+let zoom = 1;
+const camOffset = new THREE.Vector3(0, 3.4, 3.4);
+
+scene.add(new THREE.HemisphereLight('#fffbe8', '#5b8a3a', 1.6));
+const sun = new THREE.DirectionalLight('#fff4d6', 2.2);
+sun.position.set(3, 6, 2);
+sun.castShadow = true;
+sun.shadow.mapSize.set(1024, 1024);
+Object.assign(sun.shadow.camera, { left: -4, right: 4, top: 4, bottom: -4, near: 0.5, far: 20 });
+sun.shadow.bias = -0.0005;
+scene.add(sun, sun.target);
+
+// meadow
+const ground = new THREE.Mesh(new THREE.CircleGeometry(30, 64), new THREE.MeshStandardMaterial({ color: '#8fcf5e', roughness: 1 }));
+ground.rotation.x = -Math.PI / 2;
+ground.receiveShadow = true;
+scene.add(ground);
+
+// 1 m build grid around the burrow (grid placement is the working assumption)
+const grid = new THREE.GridHelper(12, 12, '#6fae45', '#7dbd50');
+grid.position.y = 0.002;
+scene.add(grid);
+
+// burrow mound + carrot patch + grass tufts for scale
+const soil = new THREE.MeshStandardMaterial({ color: '#8a5a34', roughness: 1 });
+const mound = new THREE.Mesh(new THREE.SphereGeometry(0.7, 24, 12, 0, Math.PI * 2, 0, Math.PI / 2), soil);
+mound.scale.y = 0.45; mound.position.set(-2, 0, -2); mound.castShadow = mound.receiveShadow = true;
+const hole = new THREE.Mesh(new THREE.CircleGeometry(0.22, 20), new THREE.MeshBasicMaterial({ color: '#2b1a0e' }));
+hole.position.set(-2, 0.2, -1.5); hole.rotation.x = -0.9;
+scene.add(mound, hole);
+
+const bed = new THREE.Mesh(new THREE.BoxGeometry(2, 0.08, 1.2), soil);
+bed.position.set(2, 0.04, -2); bed.receiveShadow = true; scene.add(bed);
+const carrotTop = new THREE.ConeGeometry(0.05, 0.22, 5);
+const carrotMat = new THREE.MeshStandardMaterial({ color: '#4d9b2f' });
+for (let i = 0; i < 4; i++) for (let j = 0; j < 3; j++) {
+  const c = new THREE.Mesh(carrotTop, carrotMat);
+  c.position.set(1.4 + i * 0.4, 0.18, -2.35 + j * 0.35); c.castShadow = true; scene.add(c);
+}
+const tuftGeo = new THREE.ConeGeometry(0.04, 0.18, 4);
+const tuftMat = new THREE.MeshStandardMaterial({ color: '#6db843' });
+const tufts = new THREE.InstancedMesh(tuftGeo, tuftMat, 500);
+const m4 = new THREE.Matrix4(), rnd = (a, b) => a + Math.random() * (b - a);
+for (let i = 0; i < 500; i++) {
+  const r = rnd(1.5, 18), a = rnd(0, Math.PI * 2);
+  m4.makeRotationZ(rnd(-0.3, 0.3)).setPosition(Math.cos(a) * r, 0.08, Math.sin(a) * r);
+  tufts.setMatrixAt(i, m4);
+}
+scene.add(tufts);
+
+// aim reticle
+const reticle = new THREE.Mesh(new THREE.RingGeometry(0.12, 0.16, 24), new THREE.MeshBasicMaterial({ color: '#f07a1a', transparent: true, opacity: 0.85 }));
+reticle.rotation.x = -Math.PI / 2; reticle.position.y = 0.01; reticle.visible = false; scene.add(reticle);
+
+// placeholder weapon: a carrot launcher (tube + carrot tip)
+function makeLauncher() {
+  const g = new THREE.Group();
+  const tube = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.04, 0.28, 12), new THREE.MeshStandardMaterial({ color: '#6c7a86', metalness: 0.4, roughness: 0.5 }));
+  tube.rotation.x = Math.PI / 2;
+  const tip = new THREE.Mesh(new THREE.ConeGeometry(0.03, 0.1, 10), new THREE.MeshStandardMaterial({ color: '#f07a1a' }));
+  tip.rotation.x = Math.PI / 2; tip.position.z = 0.17;
+  g.add(tube, tip);
+  g.traverse(o => { if (o.isMesh) o.castShadow = true; });
+  return g;
+}
+const launcher = makeLauncher();
+
+// seeds
+const seeds = [];
+const seedGeo = new THREE.SphereGeometry(0.025, 8, 6);
+const seedMat = new THREE.MeshStandardMaterial({ color: '#f2d36b' });
+
+// ---------- input ----------
+const keys = new Set();
+addEventListener('keydown', e => { if (e.target.tagName === 'SELECT') return; keys.add(e.code); if (e.code === 'Space') e.preventDefault(); });
+addEventListener('keyup', e => keys.delete(e.code));
+addEventListener('blur', () => { keys.clear(); mouseHeld = false; touchFire = false; });
+
+let mouseHeld = false, touchFire = false;
+const pointerNDC = new THREE.Vector2(0, 0); let pointerOnStage = false;
+renderer.domElement.addEventListener('pointerdown', e => { if (e.pointerType === 'mouse') { mouseHeld = true; setPointer(e); } });
+addEventListener('pointerup', e => { if (e.pointerType === 'mouse') mouseHeld = false; });
+renderer.domElement.addEventListener('pointermove', e => { if (e.pointerType === 'mouse') setPointer(e); });
+function setPointer(e) { pointerOnStage = true; pointerNDC.set((e.clientX / innerWidth) * 2 - 1, -(e.clientY / innerHeight) * 2 + 1); }
+renderer.domElement.addEventListener('wheel', e => { zoom = THREE.MathUtils.clamp(zoom * (e.deltaY > 0 ? 1.1 : 0.9), 0.45, 2.4); e.preventDefault(); }, { passive: false });
+
+// touch stick
+const stickEl = document.getElementById('stick'), knob = stickEl.querySelector('i');
+const stickVec = new THREE.Vector2(); let stickId = null;
+function stickMove(e) {
+  const r = stickEl.getBoundingClientRect(), cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+  stickVec.set(e.clientX - cx, e.clientY - cy);
+  const max = r.width / 2; if (stickVec.length() > max) stickVec.setLength(max);
+  knob.style.transform = `translate(${stickVec.x}px, ${stickVec.y}px)`;
+  stickVec.divideScalar(max);
+}
+stickEl.addEventListener('pointerdown', e => { stickId = e.pointerId; stickEl.setPointerCapture(e.pointerId); stickMove(e); });
+stickEl.addEventListener('pointermove', e => { if (e.pointerId === stickId) stickMove(e); });
+const stickEnd = e => { if (e.pointerId !== stickId) return; stickId = null; stickVec.set(0, 0); knob.style.transform = ''; };
+stickEl.addEventListener('pointerup', stickEnd); stickEl.addEventListener('pointercancel', stickEnd);
+const fireBtn = document.getElementById('fire');
+fireBtn.addEventListener('pointerdown', e => { touchFire = true; fireBtn.classList.add('held'); fireBtn.setPointerCapture(e.pointerId); });
+const fireEnd = () => { touchFire = false; fireBtn.classList.remove('held'); };
+fireBtn.addEventListener('pointerup', fireEnd); fireBtn.addEventListener('pointercancel', fireEnd);
+
+// ---------- bunny ----------
+const hud = { stance: document.getElementById('stance'), clip: document.getElementById('clip'), sel: document.getElementById('clipSel') };
+let bunny, mixer, actions = {}, current = null, bones = {};
+const st = { stance: 'fours', firing: false, fireCd: 0, idleT: 0, periscope: false, preview: '' };
+
+function play(name, fade = 0.18, once = false) {
+  const next = actions[name]; if (!next || current === next) return;
+  next.reset();
+  next.setLoop(once ? THREE.LoopOnce : THREE.LoopRepeat, Infinity);
+  next.clampWhenFinished = once;
+  next.enabled = true;
+  if (current) next.crossFadeFrom(current, fade, false);
+  next.play();
+  current = next;
+  hud.clip.textContent = name;
+}
+
+function attachWeapon(where) {
+  const bone = where === 'hand' ? bones.hand_R : bones.weapon_stow;
+  if (!bone || launcher.parent === bone) return;
+  bone.add(launcher);
+  // undo the bone's world scale so the launcher stays its real size
+  const s = new THREE.Vector3(); bone.updateWorldMatrix(true, false); bone.matrixWorld.decompose(new THREE.Vector3(), new THREE.Quaternion(), s);
+  launcher.scale.setScalar(1 / s.x);
+  if (where === 'hand') { launcher.position.set(0, 0.04 / s.x, 0); launcher.rotation.set(-Math.PI / 2, 0, 0); }
+  else { launcher.position.set(0, 0.02 / s.x, 0.06 / s.x); launcher.rotation.set(0, 0, Math.PI / 2); }
+}
+
+function setStance(s) {
+  st.stance = s;
+  const up = s === 'up' || s === 'rising';
+  hud.stance.textContent = { up: 'upright', fours: 'all fours', rising: 'rearing up', dropping: 'dropping' }[s];
+  hud.stance.className = 'pill ' + (up ? 'up' : 'fours');
+}
+
+const loader = new GLTFLoader();
+const bar = document.getElementById('bar');
+function load(urls) {
+  const url = urls.shift();
+  loader.load(url, onLoad, p => { if (p.total) bar.style.width = (100 * p.loaded / p.total).toFixed(0) + '%'; },
+    err => urls.length ? load(urls) : (document.getElementById('loadMsg').textContent = 'Could not load bunny_example.glb. Serve this folder over http (e.g. npx serve) rather than opening the file directly.'));
+}
+load(['bunny_example.glb', '../assets/models/bunny_example.glb']);
+
+function onLoad(gltf) {
+  bunny = gltf.scene;
+  bunny.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } if (o.isBone) bones[o.name] = o; });
+  scene.add(bunny);
+  mixer = new THREE.AnimationMixer(bunny);
+  for (const clip of gltf.animations) {
+    actions[clip.name] = mixer.clipAction(clip);
+    const o = document.createElement('option'); o.value = o.textContent = clip.name; hud.sel.appendChild(o);
+  }
+  mixer.addEventListener('finished', e => {
+    const n = e.action.getClip().name;
+    if (st.preview) { if (n === st.preview) setTimeout(() => { if (st.preview === n) { e.action.reset().play(); } }, 400); return; }
+    if (n === 'rise_to_up') setStance('up');
+    else if (n === 'drop_to_fours') { setStance('fours'); attachWeapon('stow'); }
+    else if (n === 'fire_up') st.firing = false;
+    current = null; // let the loop picker take over next frame
+  });
+  attachWeapon('stow');
+  play('idle_fours', 0);
+  document.getElementById('loading').hidden = true;
+}
+
+hud.sel.addEventListener('change', () => {
+  st.preview = hud.sel.value;
+  hud.sel.blur();
+  if (!mixer) return;
+  if (st.preview) {
+    const n = st.preview;
+    attachWeapon(/_up$/.test(n) || n === 'rise_to_up' ? 'hand' : 'stow');
+    current = null; play(n, 0.1, !LOOPS.includes(n));
+    hud.stance.textContent = 'clip preview'; hud.stance.className = 'pill';
+  } else { current = null; setStance(st.stance); }
+});
+
+// ---------- loop ----------
+const ray = new THREE.Raycaster(), groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+const aimPt = new THREE.Vector3(), tmp = new THREE.Vector3(), move = new THREE.Vector3();
+let heading = 0;
+const clock = new THREE.Clock();
+
+function update(dt) {
+  if (!bunny) return;
+  mixer.update(dt);
+  for (let i = seeds.length - 1; i >= 0; i--) {
+    const s = seeds[i]; s.life -= dt; s.v.y -= 3 * dt; s.mesh.position.addScaledVector(s.v, dt);
+    if (s.life <= 0 || s.mesh.position.y < 0) { scene.remove(s.mesh); seeds.splice(i, 1); }
+  }
+  if (st.preview) return;
+
+  // input -> camera-relative move (camera looks along -Z, so screen-up is world -Z)
+  move.set(0, 0, 0);
+  if (keys.has('KeyW') || keys.has('ArrowUp')) move.z -= 1;
+  if (keys.has('KeyS') || keys.has('ArrowDown')) move.z += 1;
+  if (keys.has('KeyA') || keys.has('ArrowLeft')) move.x -= 1;
+  if (keys.has('KeyD') || keys.has('ArrowRight')) move.x += 1;
+  let mag = Math.min(1, move.length());
+  if (stickVec.lengthSq() > 0.02) { move.set(stickVec.x, 0, stickVec.y); mag = Math.min(1, stickVec.length()); }
+  const moving = mag > 0.1;
+  if (moving) move.normalize();
+  const running = moving && (keys.has('ShiftLeft') || keys.has('ShiftRight') || mag > 0.92 && stickId !== null);
+  const aiming = mouseHeld || keys.has('Space') || touchFire;
+
+  // periscope: sit up and look around after idling on all fours
+  if (st.stance === 'fours' && !moving && !aiming) st.idleT += dt; else st.idleT = 0;
+  if (st.idleT > PERISCOPE_AFTER) { st.periscope = true; st.idleT = 0; }
+  if (moving || aiming) st.periscope = false;
+  const wantUp = aiming || st.periscope;
+
+  if (wantUp && st.stance === 'fours') { setStance('rising'); attachWeapon('hand'); current = null; play('rise_to_up', 0.08, true); }
+  if (!wantUp && st.stance === 'up' && !st.firing) { setStance('dropping'); current = null; play('drop_to_fours', 0.08, true); }
+
+  // aim point
+  if (aiming) {
+    if (pointerOnStage && mouseHeld || pointerOnStage && keys.has('Space')) {
+      ray.setFromCamera(pointerNDC, camera); ray.ray.intersectPlane(groundPlane, aimPt);
+    } else {
+      aimPt.set(Math.sin(heading), 0, Math.cos(heading)).multiplyScalar(3).add(bunny.position);
+    }
+    reticle.position.set(aimPt.x, 0.01, aimPt.z);
+  }
+  reticle.visible = aiming && st.stance !== 'fours';
+
+  // speed by stance
+  let speed = 0;
+  if (moving) speed = st.stance === 'fours' ? (running ? SPEED.run : SPEED.hop) : st.stance === 'up' ? SPEED.strafe : SPEED.transition;
+  bunny.position.addScaledVector(move, speed * dt);
+  bunny.position.x = THREE.MathUtils.clamp(bunny.position.x, -14, 14);
+  bunny.position.z = THREE.MathUtils.clamp(bunny.position.z, -14, 14);
+
+  // facing: toward aim when upright and aiming, otherwise toward travel
+  let target = heading;
+  if (aiming && st.stance !== 'fours') { tmp.subVectors(aimPt, bunny.position); if (tmp.lengthSq() > 0.01) target = Math.atan2(tmp.x, tmp.z); }
+  else if (moving) target = Math.atan2(move.x, move.z);
+  let d = ((target - heading + Math.PI) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2) - Math.PI;
+  heading += d * Math.min(1, dt * 12);
+  bunny.rotation.y = heading;
+
+  // firing
+  st.fireCd -= dt;
+  if (aiming && st.stance === 'up' && st.fireCd <= 0) {
+    st.fireCd = FIRE_INTERVAL; st.firing = true; current = null; play('fire_up', 0.05, true);
+    const m = new THREE.Mesh(seedGeo, seedMat); m.castShadow = true;
+    launcher.getWorldPosition(m.position);
+    const dir = new THREE.Vector3(Math.sin(heading), 0.12, Math.cos(heading)).normalize();
+    m.position.addScaledVector(dir, 0.15);
+    scene.add(m); seeds.push({ mesh: m, v: dir.multiplyScalar(9), life: 1.2 });
+  }
+
+  // loop clip for the current stance
+  if (!st.firing && (st.stance === 'fours' || st.stance === 'up')) {
+    const want = st.stance === 'fours' ? (moving ? (running ? 'run' : 'hop') : 'idle_fours')
+      : moving ? 'strafe_up' : aiming ? 'aim_up' : 'idle_up';
+    play(want);
+  }
+}
+
+function frame() {
+  const dt = Math.min(clock.getDelta(), 0.05);
+  update(dt);
+  const focus = bunny ? bunny.position : new THREE.Vector3();
+  camera.position.copy(focus).addScaledVector(camOffset, zoom);
+  camera.lookAt(focus.x, focus.y + 0.3, focus.z);
+  sun.position.set(focus.x + 3, 6, focus.z + 2); sun.target.position.copy(focus);
+  renderer.render(scene, camera);
+  requestAnimationFrame(frame);
+}
+function resize() { const w = stage.clientWidth, h = stage.clientHeight; renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix(); }
+addEventListener('resize', resize); resize();
+frame();
+</script>
