@@ -1,0 +1,12 @@
+{
+ "mode": "refine",
+ "preview_task_id": "01a20407-98d3-77fb-b105-71753ab5be81",
+ "ai_model": "meshy-6",
+ "enable_pbr": true,
+ "texture_resolution": "2k",
+ "remove_lighting": true,
+ "texture_prompt": "Bright cute cartoon rabbit, soft warm light-brown fur on the back, head and ears, creamy white belly, muzzle, paws and fluffy tail, soft pink inner ears and pink nose, big glossy dark eyes with white highlights, a small bright red cloth headband with a knot on the forehead, clean hand-painted stylized toy look, soft matte fur, no dirt.",
+ "target_formats": [
+  "glb"
+ ]
+}

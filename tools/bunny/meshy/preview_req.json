@@ -1,0 +1,6 @@
+{"mode":"preview",
+ "prompt":"Cute stylized cartoon rabbit hero for a bright action game, standing upright on its hind legs in an A-pose, arms held out and away from the body. Real rabbit proportions: strong long hind legs with big long feet, long front legs, chunky rounded body, fluffy round tail. Two tall upright ears clearly separated from each other. Big expressive eyes, slightly determined scrappy expression, small red headband. Soft cream and light brown fur, chunky simple shapes, clear silhouette, Pixar-like toy style, single character, empty paws, no base.",
+ "negative_prompt":"realistic, photoreal, creepy, horror, scary, uncanny, human body, clothes, weapon, base, pedestal",
+ "ai_model":"meshy-7.1","model_type":"standard","pose_mode":"a-pose",
+ "should_remesh":true,"topology":"triangle","target_polycount":12000,
+ "target_formats":["glb"]}
