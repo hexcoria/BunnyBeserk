@@ -27,13 +27,15 @@ A rigged, animated cartoon rabbit built to the spec above. The same model, skele
 | `bunny_example_unreal.fbx` | Unreal Engine | Z up, faces +X, centimetres (about 70 cm tall on import, Import Uniform Scale 1) |
 | `bunny_example.blend` | Editing in Blender (4.5 LTS) | Blender's Z up, faces -Y, metres |
 
-All files: about 0.70 m tall, origin at the feet (ground centre), 12,499 triangles, one material with a 1024×1024 base colour texture (embedded in the FBX and glTF files, packed in the `.blend`). No cameras or lights.
+All files: about 0.70 m tall, origin at the feet (ground centre), 12,499 triangles, one PBR material with three 1024×1024 maps (embedded in the FBX and glTF files, packed in the `.blend`). No cameras or lights.
+
+**Texture.** Hand-painted cartoon texture from Meshy's texturing (refine) pass on the same base mesh, downscaled from 2048 to 1024: base colour (light-brown fur, cream belly, muzzle, paws and tail, pink inner ears and nose, big dark eyes, red headband with a knot), a normal map and a roughness map. Metalness is 0. In the glTF the roughness sits in the green channel of the metallic-roughness texture.
 
 ### Unity notes
 - Use rig type **Generic**: the skeleton has rabbit proportions and extra ear and tail bones, so Humanoid retargeting is not a good fit.
 - Each clip is a separate take; Unity lists them as `idle_up`, `aim_up`, and so on. Set **Loop Time** on the looping clips (table below).
 - The FBX has Blender's usual -90° X node rotation on `Armature` and `Body`. Tick **Bake Axis Conversion** in the Model tab to fold it into the data; the model faces +Z either way.
-- The texture is embedded: use **Extract Textures** in the Materials tab if you want it as a separate asset.
+- The textures are embedded: use **Extract Textures** in the Materials tab if you want them as separate assets (mark `bunny_normal` as a Normal Map if Unity asks).
 
 ### Unreal notes
 - Import as a **Skeletal Mesh** with **Import Animations** on; each take becomes an Animation Sequence.
@@ -70,7 +72,6 @@ Each take is keyed from frame 0 to its last frame inclusive; on the looping clip
 - `root` and `weapon_stow` have no skin weights; every vertex has at most four influences, normalised.
 
 ## Known limitations
-- **Placeholder texture.** The base colour was painted in Blender, because the Meshy texturing step did not run. Expect flat colour areas and soft edges; a proper texture pass is still to do.
 - **Short arms and legs.** The proportions come from the Meshy base mesh, so the limbs are short for the body.
 - **The gallop reads as leaps.** `run` is a bounding gait that looks like a series of jumps rather than a fluid run.
 - Tested by re-importing each FBX into a clean Blender 4.5 scene (takes, frame ranges, bone and triangle counts, height and facing all checked). Not yet opened in Unity or Unreal themselves.
