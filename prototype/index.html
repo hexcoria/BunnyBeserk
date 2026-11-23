@@ -273,7 +273,7 @@ function load(urls) {
   loader.load(url, onLoad, p => { if (p.total) bar.style.width = (100 * p.loaded / p.total).toFixed(0) + '%'; },
     err => urls.length ? load(urls) : (document.getElementById('loadMsg').textContent = 'Could not load bunny_example.glb. Serve this folder over http (e.g. npx serve) rather than opening the file directly.'));
 }
-load(['bunny_example.glb', '../assets/models/bunny_example.glb']);
+load(['bunny_example.glb', 'bunny_example.gltf.json', '../assets/models/bunny_example.glb']);
 
 function onLoad(gltf) {
   bunny = gltf.scene;
